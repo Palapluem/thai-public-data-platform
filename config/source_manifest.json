@@ -1,0 +1,38 @@
+{
+  "manifest_version": 1,
+  "verified_at": "2026-09-04",
+  "status": "local_baseline",
+  "notes": "Baseline files are stored for deterministic local development. This manifest does not claim that these are the latest official releases.",
+  "sources": {
+    "ocsc_government_manpower": {
+      "source_name": "OCSC government workforce statistics",
+      "dataset_name": "ocsc_government_manpower",
+      "source_page_url": "https://www.ocsc.go.th/strategy-policy-work-plan/reports-statistics/government-workforce-statistics-report/2021-present-workforce-statistics/",
+      "filename": "thai-gov-manpower-2567.4.xlsx",
+      "path": "datasets/ocsc/thai-gov-manpower-2567.4.xlsx",
+      "sha256": "fcb9ee5644ee235031a0e363e42dc8a207b72248e8d8ac770e6b4de9afad7f9b",
+      "expected_parsed_rows": 5784,
+      "fiscal_year": 2024,
+      "fiscal_year_be": 2567,
+      "as_of_date": null,
+      "sheet_count": 68,
+      "non_empty_cells": 32653,
+      "formula_cells": 261
+    },
+    "cgd_budget_execution": {
+      "source_name": "CGD budget disbursement statistics",
+      "dataset_name": "cgd_budget_execution",
+      "source_page_url": "https://www.cgd.go.th/cs/internet/internet/%E0%B8%82%E0%B9%88%E0%B8%B2%E0%B8%A7%E0%B8%AA%E0%B8%96%E0%B8%B4%E0%B8%95%E0%B8%B4.html",
+      "filename": "2026.07.03.xlsx",
+      "path": "datasets/cgd/2026.07.03.xlsx",
+      "sha256": "309ad096e8e1372968346f994d2912faa5e89e96a3d389552ea9f9e3b2c58e95",
+      "expected_parsed_rows": 2937,
+      "fiscal_year": 2026,
+      "fiscal_year_be": 2569,
+      "as_of_date": "2026-07-03",
+      "sheet_count": 15,
+      "non_empty_cells": 93237,
+      "formula_cells": 19
+    }
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "fixture_name": "bad_data_quality",
+  "description": "Synthetic rows that intentionally violate the Thai Public Data Platform quality contract.",
+  "expected_gate_status": "blocked",
+  "expected_downstream_behavior": "Do not publish core or ClickHouse; retain raw, staging and ops evidence.",
+  "source_file_id": "00000000-0000-0000-0000-000000000001",
+  "run_id": "00000000-0000-0000-0000-000000000099",
+  "cgd_budget_execution": [
+    {
+      "source_file_id": "00000000-0000-0000-0000-000000000001",
+      "sheet_name": "3.หน่วยงาน",
+      "row_number": 6,
+      "report_type": "disbursement",
+      "expense_category": "total",
+      "entity_type": "agency",
+      "entity_name": "หน่วยงานตัวอย่าง",
+      "entity_code": "BAD001",
+      "budget_after_transfer_million_baht": -10.0,
+      "disbursement_million_baht": 20.0,
+      "disbursement_pct": 120.0
+    },
+    {
+      "source_file_id": "00000000-0000-0000-0000-000000000001",
+      "sheet_name": "3.หน่วยงาน",
+      "row_number": 6,
+      "report_type": "disbursement",
+      "expense_category": "total",
+      "entity_type": "agency",
+      "entity_name": "หน่วยงานตัวอย่าง",
+      "entity_code": "BAD001",
+      "budget_after_transfer_million_baht": 10.0,
+      "disbursement_million_baht": 20.0,
+      "disbursement_pct": 120.0
+    },
+    {
+      "source_file_id": "00000000-0000-0000-0000-000000000001",
+      "sheet_name": "3.หน่วยงาน",
+      "row_number": 7,
+      "report_type": "disbursement",
+      "expense_category": "total",
+      "entity_type": "agency",
+      "entity_name": "อีกหน่วยงาน",
+      "entity_code": "BAD002",
+      "budget_after_transfer_million_baht": 30.0,
+      "disbursement_million_baht": 50.0,
+      "disbursement_pct": 50.0
+    },
+    {
+      "source_file_id": "00000000-0000-0000-0000-000000000001",
+      "sheet_name": "3.หน่วยงาน",
+      "row_number": 8,
+      "report_type": "disbursement",
+      "expense_category": "total",
+      "entity_type": "total",
+      "entity_name": "รวม",
+      "entity_code": null,
+      "budget_after_transfer_million_baht": 40.0,
+      "disbursement_million_baht": 60.0,
+      "disbursement_pct": 60.0
+    }
+  ],
+  "ocsc_workforce": [
+    {
+      "source_file_id": "00000000-0000-0000-0000-000000000001",
+      "sheet_name": "17-29",
+      "row_number": 8,
+      "agency_name": "หน่วยงานตัวอย่าง",
+      "metric_name": "civil_servant",
+      "metric_group": "employment_type",
+      "headcount": -1,
+      "percentage": null,
+      "source_unit": "person"
+    }
+  ],
+  "expected_failing_checks": [
+    "required_source_identity_or_run_context",
+    "negative_financial_value",
+    "percentage_bounds",
+    "duplicate_natural_grain",
+    "detail_to_published_total_reconciliation",
+    "foreign_key_integrity",
+    "unexpected_row_count_or_semantic_mismatch"
+  ],
+  "separate_empty_case": {
+    "cgd_budget_execution": [],
+    "ocsc_workforce": [],
+    "expected_failing_check": "zero_row_extraction"
+  }
+}

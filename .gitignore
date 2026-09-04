@@ -1,0 +1,48 @@
+# Python/tooling
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.pytest_tmp/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Local/editor/agent state
+.vscode/
+.idea/
+.codex/
+.agent/
+.agents/
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.secret
+*credentials*.json
+*service-account*.json
+secrets/
+
+# Generated runtime artifacts
+*.log
+*.duckdb
+*.duckdb.wal
+*.sqlite
+*.sqlite3
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/warehouse/*
+!data/warehouse/.gitkeep
+
+# Temporary Excel lock files
+~$*.xlsx
