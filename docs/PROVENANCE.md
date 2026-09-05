@@ -33,3 +33,25 @@ The checked-in baseline is used for local tests and Docker demonstrations. A
 future source refresh should create a new source release, recalculate its
 profile and hash, pass the same quality contract, and remain queryable through
 the raw-to-staging-to-core lineage.
+
+## Multi-format public snapshots
+
+The second source registry is [`../config/public_sources.yml`](../config/public_sources.yml).
+It contains four deterministic snapshots: a data.go.th CSV budget summary, a
+Ministry of Finance nested JSON API response, an HTML validation table and an
+NSO tabular JSON response. The adapters preserve format, source role, official
+URL, update metadata, source record number and raw payload.
+
+The JSON API and CSV answer different questions and have different grains. The
+HTML table is validation evidence, not an additional amount to sum. The NSO
+Parquet file is a derived columnar exercise and is not an independent public
+source. Hashes and parser row counts are listed in
+[`../datasets/public/README.md`](../datasets/public/README.md).
+
+## Incremental provenance
+
+`raw.public_source_release` preserves each exact release. A watermark event is
+written only after the quality gate, PostgreSQL core publication and ClickHouse
+serving publication succeed. A new release with an equal/older maximum period
+is retained as a correction/backfill and cannot move the committed watermark
+backwards.

@@ -18,7 +18,11 @@ ClickHouse analytical serving
 Analytical SQL
 ```
 
-Apache Airflow orchestrates the flow. Docker Compose provides the reproducible local runtime. GitHub Actions is CI only.
+Apache Airflow orchestrates the flow. Docker Compose provides the reproducible local runtime. GitHub Actions validates code, contracts and the application image.
+
+The diagram applies to both the original Excel facts and the P2 public-indicator
+extension. The latter adds CSV, nested JSON API, HTML and tabular JSON adapters,
+then keeps source roles and reporting grains explicit before analytical serving.
 
 ## Component responsibilities
 
@@ -26,6 +30,7 @@ Apache Airflow orchestrates the flow. Docker Compose provides the reproducible l
 |---|---|---|
 | `src/thai_data_platform/ingestion` | open source files, source metadata, raw evidence | database business joins |
 | `src/thai_data_platform/transform` | source-specific parsing and normalization | Airflow scheduling |
+| `src/thai_data_platform/public_sources` | multi-format adapters, canonical indicators, watermark and dashboard workflow | source-specific business joins |
 | `src/thai_data_platform/storage` | local landing and optional object-store adapter | core business semantics |
 | `src/thai_data_platform/warehouse` | PostgreSQL/ClickHouse load boundaries | parsing Excel layouts |
 | `src/thai_data_platform/quality` | reusable checks and gate decision | retries/scheduling |
@@ -53,7 +58,19 @@ If any step fails, the run is marked failed in `ops.pipeline_run`; no partial co
 - A repeated ingestion of identical bytes is a new operational attempt but does not create a second canonical release or duplicate fact grain.
 - Every staged/core row carries a source-file reference and source sheet/row lineage.
 - Raw cells preserve the original non-empty cell value plus sheet, row and column coordinates.
-- `ops.pipeline_run` records status, timestamps, source hashes, counts and DQ outcome.
+- `ops.pipeline_run` records status, run type, timestamps, source hashes, counts and DQ outcome.
+- `config/schema_contracts.json` protects the typed parser-to-staging handoff;
+  missing required fields fail before warehouse persistence.
+
+## Public-indicator extension
+
+The generic path accepts official Excel/CSV/JSON/HTML representations through
+format-specific adapters and normalizes them into a long-form
+`public_indicator` contract. Release registration and raw payload storage are
+followed by watermark selection: a later-period scheduled release stages only
+rows after the prior watermark, while a same/older-period new release is
+processed as a correction/backfill. The watermark is committed only after
+ClickHouse publication.
 
 ## Source-specific boundaries
 
@@ -79,4 +96,7 @@ Blocking examples are missing required keys, zero-row extraction, duplicate natu
 
 ## Operational non-goals
 
-Kafka, Spark, Kubernetes, Terraform, frontend, ML, LLM and non-essential dashboards are outside this build. They would add infrastructure surface without improving the core proof: trustworthy ingestion, constraints, quality gates, idempotency and serving.
+Kafka, Spark, Kubernetes, Terraform, production BI/frontend, ML and LLM
+features are outside this local build. They would add infrastructure surface
+without improving the core proof until scale, latency or deployment requirements
+justify them.

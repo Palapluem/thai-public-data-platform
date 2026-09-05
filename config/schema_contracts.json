@@ -1,0 +1,91 @@
+{
+  "contract_version": "1.0.0",
+  "description": "Typed parser-output contract at the staging handoff boundary.",
+  "policy": {
+    "breaking_change": "missing required columns fail closed before staging",
+    "additive_change": "additional columns are logged as non-breaking warnings"
+  },
+  "datasets": {
+    "cgd_budget_execution": {
+      "extracts": {
+        "budget_execution": {
+          "allow_additional_columns": true,
+          "required_columns": [
+            "ingestion_run_id",
+            "dataset_name",
+            "source_file_hash",
+            "sheet_index",
+            "sheet_name",
+            "row_number",
+            "fiscal_year",
+            "fiscal_year_be",
+            "as_of_date",
+            "report_type",
+            "entity_type",
+            "entity_name",
+            "entity_code",
+            "expense_category",
+            "budget_after_transfer_million_baht",
+            "allocated_million_baht",
+            "po_reserved_debt_million_baht",
+            "disbursement_million_baht",
+            "disbursement_pct",
+            "expenditure_million_baht",
+            "expenditure_pct",
+            "monthly_target_gap_pct",
+            "remaining_million_baht",
+            "remaining_pct"
+          ]
+        }
+      }
+    },
+    "ocsc_government_manpower": {
+      "extracts": {
+        "workforce_agency": {
+          "allow_additional_columns": true,
+          "required_columns": [
+            "ingestion_run_id",
+            "dataset_name",
+            "source_file_hash",
+            "sheet_index",
+            "sheet_name",
+            "row_number",
+            "fiscal_year",
+            "fiscal_year_be",
+            "entity_type",
+            "ministry_name",
+            "agency_name",
+            "metric_name",
+            "metric_group",
+            "headcount",
+            "percentage",
+            "source_value",
+            "source_unit"
+          ]
+        },
+        "workforce_profile": {
+          "allow_additional_columns": true,
+          "required_columns": [
+            "ingestion_run_id",
+            "dataset_name",
+            "source_file_hash",
+            "sheet_index",
+            "sheet_name",
+            "row_number",
+            "fiscal_year",
+            "fiscal_year_be",
+            "entity_type",
+            "ministry_name",
+            "agency_name",
+            "metric_name",
+            "metric_group",
+            "headcount",
+            "percentage",
+            "source_value",
+            "source_unit"
+          ]
+        }
+      }
+    }
+  }
+}

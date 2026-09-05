@@ -1,6 +1,9 @@
 CREATE TABLE IF NOT EXISTS ops.pipeline_run (
     run_id UUID PRIMARY KEY,
     pipeline_name TEXT NOT NULL DEFAULT 'thai_public_data_platform',
+    run_type TEXT NOT NULL DEFAULT 'manual' CHECK (
+        run_type IN ('manual', 'scheduled', 'backfill', 'replay')
+    ),
     status TEXT NOT NULL CHECK (
         status IN (
             'prepared',

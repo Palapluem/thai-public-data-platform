@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -14,9 +14,13 @@ import pandas as pd
 import psycopg
 
 from thai_data_platform.ingestion.metadata import SourceFileMetadata
+from thai_data_platform.public_sources.models import ParsedPublicSource
+from thai_data_platform.public_sources.watermark import WatermarkDecision, decide_watermark
 from thai_data_platform.quality.gate import QualityGateError
 from thai_data_platform.transform.cgd import CgdExtract
 from thai_data_platform.transform.ocsc import OcscExtract
+
+VALID_RUN_TYPES = frozenset({"manual", "scheduled", "backfill", "replay"})
 
 
 @dataclass(frozen=True)
@@ -26,6 +30,21 @@ class StageResult:
     raw_cell_count: int
     cgd_row_count: int
     ocsc_row_count: int
+
+
+@dataclass(frozen=True)
+class PublicStageResult:
+    release_ids: dict[str, str]
+    new_releases: dict[str, bool]
+    record_counts: dict[str, int]
+    selected_record_counts: dict[str, int]
+    previous_watermarks: dict[str, date | None]
+    watermark_candidates: dict[str, date | None]
+    decisions: dict[str, WatermarkDecision]
+
+    @property
+    def selected_row_count(self) -> int:
+        return sum(self.selected_record_counts.values())
 
 
 def connect(postgres_url: str) -> psycopg.Connection:
@@ -53,16 +72,21 @@ def prepare_run(
     source_hashes: Iterable[str],
     *,
     pipeline_name: str = "thai_public_data_platform",
+    run_type: str = "manual",
 ) -> None:
+    _validate_run_type(run_type)
     with connect(postgres_url) as connection:
         connection.execute(
             """
-            INSERT INTO ops.pipeline_run (run_id, pipeline_name, status, started_at, source_hashes)
-            VALUES (%s, %s, 'prepared', %s, %s::jsonb)
+            INSERT INTO ops.pipeline_run (
+                run_id, pipeline_name, run_type, status, started_at, source_hashes
+            )
+            VALUES (%s, %s, %s, 'prepared', %s, %s::jsonb)
             """,
             (
                 run_id,
                 pipeline_name,
+                run_type,
                 _utc_now(),
                 json.dumps(sorted(set(source_hashes))),
             ),
@@ -144,6 +168,269 @@ def stage_extracts(
         cgd_row_count=cgd_row_count,
         ocsc_row_count=ocsc_row_count,
     )
+
+
+def public_watermarks(postgres_url: str, source_ids: Iterable[str]) -> dict[str, date | None]:
+    """Read the last committed watermark for each public source."""
+    ids = list(source_ids)
+    if not ids:
+        return {}
+    with connect(postgres_url) as connection:
+        rows = connection.execute(
+            """
+            SELECT source_id, watermark_value
+            FROM ops.public_source_watermark
+            WHERE source_id = ANY(%s)
+            """,
+            (ids,),
+        ).fetchall()
+    values = {str(source_id): watermark for source_id, watermark in rows}
+    return {source_id: values.get(source_id) for source_id in ids}
+
+
+def public_release_exists(
+    postgres_url: str,
+    sources: Iterable[ParsedPublicSource],
+) -> dict[str, bool]:
+    """Return whether the exact content hash has already been registered."""
+    source_list = list(sources)
+    if not source_list:
+        return {}
+    pairs = [(source.spec.source_id, source.content_sha256) for source in source_list]
+    with connect(postgres_url) as connection:
+        existing = connection.execute(
+            """
+            SELECT source_id, content_sha256
+            FROM raw.public_source_release
+            WHERE (source_id, content_sha256) IN (
+                SELECT * FROM UNNEST(%s::TEXT[], %s::CHAR(64)[])
+            )
+            """,
+            ([pair[0] for pair in pairs], [pair[1] for pair in pairs]),
+        ).fetchall()
+    existing_pairs = {(str(source_id), str(content_hash)) for source_id, content_hash in existing}
+    return {
+        source.spec.source_id: (source.spec.source_id, source.content_sha256) in existing_pairs
+        for source in source_list
+    }
+
+
+def public_release_committed(
+    postgres_url: str,
+    sources: Iterable[ParsedPublicSource],
+) -> dict[str, bool]:
+    """Return whether the release reached the post-serving watermark commit."""
+    source_list = list(sources)
+    if not source_list:
+        return {}
+    pairs = [(source.spec.source_id, source.content_sha256) for source in source_list]
+    with connect(postgres_url) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                release.source_id,
+                release.content_sha256,
+                EXISTS (
+                    SELECT 1
+                    FROM ops.public_watermark_event AS event
+                    WHERE event.release_id = release.release_id
+                      AND event.status <> 'failed'
+                ) AS committed
+            FROM raw.public_source_release AS release
+            WHERE (release.source_id, release.content_sha256) IN (
+                SELECT * FROM UNNEST(%s::TEXT[], %s::CHAR(64)[])
+            )
+            """,
+            ([pair[0] for pair in pairs], [pair[1] for pair in pairs]),
+        ).fetchall()
+    return {
+        source.spec.source_id: any(
+            str(source_id) == source.spec.source_id
+            and str(content_hash) == source.content_sha256
+            and bool(committed)
+            for source_id, content_hash, committed in rows
+        )
+        for source in source_list
+    }
+
+
+def stage_public_sources(
+    postgres_url: str,
+    run_id: str,
+    sources: list[ParsedPublicSource],
+    selected_records: dict[str, pd.DataFrame],
+    *,
+    run_type: str = "scheduled",
+) -> PublicStageResult:
+    """Persist public raw evidence and selected canonical rows atomically.
+
+    Raw records always preserve the complete downloaded release. Staging only
+    receives the watermark-selected slice, which makes the incremental choice
+    visible and keeps a later correction/backfill auditable.
+    """
+    source_ids = [source.spec.source_id for source in sources]
+    previous = public_watermarks(postgres_url, source_ids)
+    release_ids: dict[str, str] = {}
+    new_releases: dict[str, bool] = {}
+    record_counts = {source.spec.source_id: len(source.records) for source in sources}
+    selected_counts = {
+        source.spec.source_id: len(selected_records.get(source.spec.source_id, pd.DataFrame()))
+        for source in sources
+    }
+    candidates = {source.spec.source_id: source.watermark for source in sources}
+    decisions: dict[str, WatermarkDecision] = {}
+
+    with connect(postgres_url) as connection:
+        for source in sources:
+            source_id = source.spec.source_id
+            release_id, is_new, is_committed = _upsert_public_release(connection, run_id, source)
+            release_ids[source_id] = release_id
+            needs_processing = is_new or not is_committed
+            new_releases[source_id] = needs_processing
+            # If serving publication succeeded but the worker died before the
+            # watermark commit, an existing release with no prior watermark
+            # must be safely repairable on the next run.
+            needs_initial_commit = (
+                previous.get(source_id) is None and candidates[source_id] is not None
+            )
+            decisions[source_id] = decide_watermark(
+                previous.get(source_id),
+                candidates[source_id],
+                is_new_release=needs_processing or needs_initial_commit,
+            )
+            _insert_public_raw_records(connection, release_id, source.records)
+            _insert_public_staging_records(
+                connection,
+                run_id,
+                release_id,
+                source,
+                selected_records.get(source_id, pd.DataFrame()),
+            )
+        connection.execute(
+            """
+            UPDATE ops.pipeline_run
+            SET status = 'staged', public_row_count = %s
+            WHERE run_id = %s
+            """,
+            (sum(selected_counts.values()), run_id),
+        )
+        connection.commit()
+
+    return PublicStageResult(
+        release_ids=release_ids,
+        new_releases=new_releases,
+        record_counts=record_counts,
+        selected_record_counts=selected_counts,
+        previous_watermarks=previous,
+        watermark_candidates=candidates,
+        decisions=decisions,
+    )
+
+
+def publish_public_core(
+    postgres_url: str,
+    run_id: str,
+) -> dict[str, int]:
+    """Move the validated public staging slice into the relational core."""
+    with connect(postgres_url) as connection:
+        inserted = connection.execute(
+            """
+            INSERT INTO core.fact_public_indicator (
+                run_id, release_id, source_id, content_sha256, source_format, source_role,
+                record_key, source_record_number, period_start, period_end, period_grain,
+                calendar_year, calendar_year_be, fiscal_year, fiscal_year_be, entity_type,
+                entity_code, entity_name, geography_type, geography_code, geography_name,
+                category, subcategory, metric_name, metric_unit, value, reference_metric,
+                reference_value, source_url, raw_payload
+            )
+            SELECT
+                run_id, release_id, source_id, content_sha256, source_format, source_role,
+                record_key, source_record_number, period_start, period_end, period_grain,
+                calendar_year, calendar_year_be, fiscal_year, fiscal_year_be, entity_type,
+                entity_code, entity_name, geography_type, geography_code, geography_name,
+                category, subcategory, metric_name, metric_unit, value, reference_metric,
+                reference_value, source_url, raw_payload
+            FROM staging.public_indicator
+            WHERE run_id = %s
+            ON CONFLICT DO NOTHING
+            RETURNING core_public_id
+            """,
+            (run_id,),
+        ).fetchall()
+        connection.execute(
+            """
+            UPDATE ops.pipeline_run
+            SET status = 'core_published',
+                public_row_count = (
+                    SELECT COUNT(*) FROM staging.public_indicator WHERE run_id = %s
+                ),
+                core_published_at = now()
+            WHERE run_id = %s
+            """,
+            (run_id, run_id),
+        )
+        connection.commit()
+    return {"public_indicators": len(inserted)}
+
+
+def mark_public_watermarks(
+    postgres_url: str,
+    run_id: str,
+    stage_result: PublicStageResult,
+) -> int:
+    """Commit watermark state only after ClickHouse publication succeeds."""
+    advanced_count = 0
+    with connect(postgres_url) as connection:
+        for source_id, decision in stage_result.decisions.items():
+            release_id = stage_result.release_ids[source_id]
+            selected_count = stage_result.selected_record_counts[source_id]
+            connection.execute(
+                """
+                INSERT INTO ops.public_watermark_event (
+                    run_id, source_id, release_id, previous_watermark,
+                    selected_watermark, selected_record_count, status
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    run_id,
+                    source_id,
+                    release_id,
+                    decision.previous,
+                    decision.selected,
+                    selected_count,
+                    decision.status,
+                ),
+            )
+            if not decision.is_new_release:
+                continue
+            if decision.status == "advanced":
+                advanced_count += 1
+            connection.execute(
+                """
+                INSERT INTO ops.public_source_watermark (
+                    source_id, watermark_field, watermark_value,
+                    last_release_id, last_run_id, updated_at
+                )
+                VALUES (%s, 'period_end', %s, %s, %s, now())
+                ON CONFLICT (source_id) DO UPDATE SET
+                    watermark_value = EXCLUDED.watermark_value,
+                    last_release_id = EXCLUDED.last_release_id,
+                    last_run_id = EXCLUDED.last_run_id,
+                    updated_at = now()
+                """,
+                (source_id, decision.selected, release_id, run_id),
+            )
+        connection.execute(
+            """
+            UPDATE ops.pipeline_run
+            SET watermark_advanced_count = %s
+            WHERE run_id = %s
+            """,
+            (advanced_count, run_id),
+        )
+        connection.commit()
+    return advanced_count
 
 
 def record_quality_results(
@@ -367,7 +654,7 @@ def publish_core(
         connection.execute(
             """
             UPDATE ops.pipeline_run
-            SET status = 'core_published', core_published_at = now(), ended_at = now()
+            SET status = 'core_published', core_published_at = now()
             WHERE run_id = %s
             """,
             (run_id,),
@@ -413,6 +700,12 @@ def sources_for_dataset(sources: list[SourceFileMetadata], dataset_name: str) ->
     if len(matches) != 1:
         raise ValueError(f"Expected exactly one source for {dataset_name}, found {len(matches)}")
     return matches[0]
+
+
+def _validate_run_type(run_type: str) -> None:
+    if run_type not in VALID_RUN_TYPES:
+        allowed = ", ".join(sorted(VALID_RUN_TYPES))
+        raise ValueError(f"Unsupported run_type {run_type!r}; expected one of: {allowed}")
 
 
 def _upsert_source_file(connection: psycopg.Connection, source: SourceFileMetadata) -> str:
@@ -642,6 +935,156 @@ def _insert_ocsc_staging(
             rows,
         )
     return len(rows)
+
+
+def _upsert_public_release(
+    connection: psycopg.Connection,
+    run_id: str,
+    source: ParsedPublicSource,
+) -> tuple[str, bool, bool]:
+    spec = source.spec
+    inserted = connection.execute(
+        """
+        INSERT INTO raw.public_source_release (
+            run_id, source_id, source_name, dataset_name, source_format, source_role,
+            source_url, local_path, content_sha256, source_updated_at, record_count, metadata
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+        ON CONFLICT (source_id, content_sha256) DO NOTHING
+        RETURNING release_id
+        """,
+        (
+            run_id,
+            spec.source_id,
+            spec.source_name,
+            spec.dataset_name,
+            spec.format,
+            spec.source_role,
+            spec.file_url or spec.source_page_url,
+            str(spec.path),
+            source.content_sha256,
+            source.source_updated_at,
+            len(source.records),
+            json.dumps(source.metadata, ensure_ascii=False, default=str),
+        ),
+    ).fetchone()
+    if inserted:
+        return str(inserted[0]), True, False
+    existing = connection.execute(
+        """
+        SELECT
+            release.release_id,
+            EXISTS (
+                SELECT 1
+                FROM ops.public_watermark_event AS event
+                WHERE event.release_id = release.release_id
+                  AND event.status <> 'failed'
+            ) AS committed
+        FROM raw.public_source_release AS release
+        WHERE release.source_id = %s AND release.content_sha256 = %s
+        """,
+        (spec.source_id, source.content_sha256),
+    ).fetchone()
+    if not existing:
+        raise RuntimeError(f"Public source release disappeared: {spec.source_id}")
+    return str(existing[0]), False, bool(existing[1])
+
+
+def _insert_public_raw_records(
+    connection: psycopg.Connection,
+    release_id: str,
+    frame: pd.DataFrame,
+) -> None:
+    if frame.empty:
+        return
+    rows = []
+    for row in _dataframe_records(frame):
+        rows.append(
+            (
+                release_id,
+                int(row["source_record_number"]),
+                row["record_key"],
+                row.get("period_end"),
+                json.dumps(row.get("raw_payload") or {}, ensure_ascii=False, default=str),
+            )
+        )
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            """
+            INSERT INTO raw.public_record (
+                release_id, source_record_number, record_key, watermark_value, payload
+            )
+            VALUES (%s, %s, %s, %s, %s::jsonb)
+            ON CONFLICT (release_id, record_key) DO NOTHING
+            """,
+            rows,
+        )
+
+
+def _insert_public_staging_records(
+    connection: psycopg.Connection,
+    run_id: str,
+    release_id: str,
+    source: ParsedPublicSource,
+    frame: pd.DataFrame,
+) -> None:
+    if frame.empty:
+        return
+    rows = []
+    for row in _dataframe_records(frame):
+        rows.append(
+            (
+                run_id,
+                release_id,
+                row["source_id"],
+                source.content_sha256,
+                row["source_format"],
+                row["source_role"],
+                row["record_key"],
+                int(row["source_record_number"]),
+                row.get("period_start"),
+                row.get("period_end"),
+                row["period_grain"],
+                row.get("calendar_year"),
+                row.get("calendar_year_be"),
+                row.get("fiscal_year"),
+                row.get("fiscal_year_be"),
+                row["entity_type"],
+                row.get("entity_code"),
+                row["entity_name"],
+                row.get("geography_type"),
+                row.get("geography_code"),
+                row.get("geography_name"),
+                row.get("category"),
+                row.get("subcategory"),
+                row["metric_name"],
+                row["metric_unit"],
+                row.get("value"),
+                row.get("reference_metric"),
+                row.get("reference_value"),
+                row["source_url"],
+                json.dumps(row.get("raw_payload") or {}, ensure_ascii=False, default=str),
+            )
+        )
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            """
+            INSERT INTO staging.public_indicator (
+                run_id, release_id, source_id, content_sha256, source_format, source_role,
+                record_key, source_record_number, period_start, period_end, period_grain,
+                calendar_year, calendar_year_be, fiscal_year, fiscal_year_be, entity_type,
+                entity_code, entity_name, geography_type, geography_code, geography_name,
+                category, subcategory, metric_name, metric_unit, value, reference_metric,
+                reference_value, source_url, raw_payload
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb
+            )
+            ON CONFLICT (release_id, record_key, metric_name) DO NOTHING
+            """,
+            rows,
+        )
 
 
 def _upsert_entity(

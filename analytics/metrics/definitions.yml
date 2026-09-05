@@ -1,0 +1,25 @@
+version: 1
+owner: data-platform
+purpose: "Minimal semantic contract for reproducible analyst queries"
+metrics:
+  - name: budget_disbursement_million_baht
+    source_table: analytics.fact_budget_execution
+    expression: "SUM(disbursement_million_baht)"
+    grain: "source release x sheet x source row x entity x report type x expense category"
+    required_filters:
+      - "report_type = 'disbursement'"
+      - "choose one entity level before aggregating"
+      - "do not mix expense_category = 'total' with current/investment"
+    caveats:
+      - "published total rows must not be added to their detail rows"
+      - "reporting period must be shown"
+  - name: workforce_headcount_persons
+    source_table: analytics.fact_workforce_metric
+    expression: "SUM(headcount)"
+    grain: "source release x sheet x source row x agency x metric"
+    required_filters:
+      - "source_unit = 'person'"
+      - "choose a single metric_group and entity level"
+    caveats:
+      - "percentage and average-age rows are not person counts"
+      - "the source release and fiscal year must be shown"

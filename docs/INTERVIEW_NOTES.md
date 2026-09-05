@@ -2,7 +2,7 @@
 
 ## Thirty-second project story
 
-“ผมทำ Thai Public Data Platform เพื่อแก้ปัญหา public-sector Excel ที่เป็น report สำหรับมนุษย์อ่าน ไม่ใช่ flat table ผมเก็บ raw evidence ถึงระดับ cell, แยก parser ของ CGD กับ OCSC ตาม layout และกำหนด grain ก่อนโหลดเข้า PostgreSQL `raw → staging → core` จากนั้นให้ data-quality gate ตัดสินใจก่อนส่งข้อมูลที่ผ่านไป ClickHouse สำหรับ analyst query โดยใช้ SHA-256 ทำ source identity และทำ load ให้ rerun ได้โดยไม่ duplicate”
+“ผมต่อยอดประสบการณ์ AI Engineer ด้วยการทำ Thai Public Data Platform เพื่อแก้ปัญหา public-sector Excel ที่เป็น report สำหรับมนุษย์อ่าน ไม่ใช่ flat table ผมเก็บ raw evidence ถึงระดับ cell, แยก parser ตาม layout และกำหนด grain ก่อนโหลดเข้า PostgreSQL `raw → staging → core` จากนั้นให้ data-quality gate ตัดสินใจก่อนส่งข้อมูลที่ผ่านไป ClickHouse สำหรับ analyst query โดยใช้ SHA-256 ทำ source identity, versioned schema contract และทำ load ให้ rerun/backfill ได้โดยไม่ duplicate”
 
 ## Why this is a Data Engineer project
 
@@ -12,6 +12,7 @@
 - observability: run metadata, row counts, DQ results และ source lineage
 - serving: PostgreSQL เป็น truth; ClickHouse เป็น read-optimized downstream
 - maintainability: DAG บาง, business logic อยู่ใน package และมี unit/integration tests
+- release operations: แยก manual/scheduled/backfill/replay และมี health view สำหรับอ่านสถานะ run
 
 ## Questions a reviewer may ask
 
@@ -42,6 +43,18 @@ CGD รายงานสองมุมมองที่ไม่ใช่ met
 ### ทำไมไม่เริ่ม Kafka/Spark/Kubernetes?
 
 ไม่ใช่ bottleneck ของ one-day build ข้อมูลเป็น Excel batch และ P0 ต้องพิสูจน์ correctness, lineage, constraints, idempotency และ quality gate ก่อนเพิ่ม distributed infrastructure
+
+### ถ้า source release ใหม่เข้ามาจะทำอย่างไร?
+
+ระบบใช้ content hash เป็น release identity แทน filename ถ้า bytes เดิมถูกส่งซ้ำ
+ระบบจะข้าม fact ที่มีอยู่แล้ว แต่ถ้าเป็น bytes ใหม่จะเก็บ raw/staging/core/serving
+เป็น release ใหม่ โดยบันทึก `run_type=backfill` ได้เมื่อเป็นการแก้ไขข้อมูลย้อนหลัง
+
+### ถ้า schema source เปลี่ยนจะทำอย่างไร?
+
+parser output ต้องผ่าน versioned schema contract ก่อน staging การหายไปของ
+required column เป็น breaking change และ fail closed ส่วน additive column ถูก
+รายงานเป็น warning เพื่อให้ตัดสินใจอัปเดต contract อย่างมีเจตนา
 
 ## Evidence map
 

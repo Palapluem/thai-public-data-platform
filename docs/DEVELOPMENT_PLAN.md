@@ -2,7 +2,9 @@
 
 ## Working agreement
 
-นี่คือแผน portfolio build ที่เน้น P0 ให้พิสูจน์ engineering fundamentals ก่อน แล้วค่อยพิจารณา optional work เมื่อ core ผ่านทั้งหมด
+นี่คือแผน portfolio build ที่ให้ P0 พิสูจน์ engineering fundamentals แล้วต่อด้วย
+P1 production-like behaviors ที่ทำให้ release ใหม่, backfill และ schema drift
+ตรวจสอบได้จริง
 
 กติกาหลักคือทำให้ทุก phase จบด้วย evidence ที่ตรวจได้ และไม่เริ่มงานนอก scope ก่อน P0 จะ green
 
@@ -19,7 +21,13 @@
 | 6 | ClickHouse serving | serving tables/read model จาก core ที่ผ่าน gate | **เสร็จ** |
 | 7 | Airflow DAG | task dependency ตาม contract; DAG บาง | **เสร็จ** |
 | 8 | analytical SQL + smoke tests | 4 analytical questions และ caveat | **เสร็จ** |
-| 9 | Docker/CI/docs/demo | clean setup, CI, README walkthrough | **เสร็จ; Docker integration pending local daemon** |
+| 9 | Docker/CI/docs/demo | clean setup, CI, README walkthrough | **เสร็จ; Docker integration verified** |
+| 10 | P1 release operations | schema contract, run types, health view, multi-release/backfill evidence | **เสร็จ** |
+| 11 | P1 analyst contract | metric definitions, grain/filter/caveat documentation | **เสร็จ** |
+| 12 | P2 multi-format public sources | CSV, nested JSON API, HTML table, tabular JSON, canonical contract and provenance | **เสร็จ** |
+| 13 | P2 incremental operations | content hash, period watermark, late/correction selection, retry-safe commit | **เสร็จ** |
+| 14 | P2 analytical product | ClickHouse public queries, dashboard artifact and analytical story | **เสร็จ** |
+| 15 | P2 learning pack | AI-to-DE guide, exercises, interview guide and new-project playbook | **เสร็จ** |
 
 ## Suggested one-day execution timebox
 
@@ -41,6 +49,17 @@
 - exact natural grain for each source confirmed
 - baseline files and period caveat accepted
 - no need to introduce Kafka/Spark/Kubernetes/Terraform to meet P0
+- schema contract is checked before staging
+- repeated release and new release behavior are both tested
+- backfill intent is visible in `ops.pipeline_run.run_type`
+
+## Next phase after today's P2 slice
+
+1. quarantine rejected releases without losing raw evidence;
+2. make cross-store serving publication recoverable as one release;
+3. benchmark Parquet/PySpark only when scale justifies it;
+4. add source discovery and alerting; and
+5. add cloud/IAM, deployment and rollback evidence.
 
 ## Definition of done
 

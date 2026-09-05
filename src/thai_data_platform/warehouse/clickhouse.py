@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -93,6 +94,39 @@ def publish_frames(
     return counts
 
 
+def publish_public_indicators(
+    client: Any,
+    *,
+    run_id: str,
+    stage_result: Any,
+    sources: list[Any],
+    selected_records: dict[str, pd.DataFrame],
+) -> dict[str, int]:
+    """Publish the selected canonical public rows with release idempotency."""
+    counts = {"public_indicators": 0, "skipped_existing_sources": 0}
+    for source in sources:
+        source_id = source.spec.source_id
+        frame = selected_records.get(source_id, pd.DataFrame())
+        if _public_source_already_published(client, source_id, source.content_sha256):
+            counts["skipped_existing_sources"] += 1
+            continue
+        rows = _public_rows(
+            frame,
+            run_id=run_id,
+            release_id=stage_result.release_ids[source_id],
+            content_sha256=source.content_sha256,
+        )
+        if not rows:
+            continue
+        client.insert(
+            "fact_public_indicator",
+            rows,
+            column_names=_PUBLIC_COLUMNS,
+        )
+        counts["public_indicators"] += len(rows)
+    return counts
+
+
 def run_smoke_queries(client: Any, query_dir: str | Path = "analytics/queries") -> dict[str, int]:
     results: dict[str, int] = {}
     for query_path in sorted(Path(query_dir).glob("*.sql")):
@@ -105,6 +139,22 @@ def run_smoke_queries(client: Any, query_dir: str | Path = "analytics/queries") 
         # semicolon so ClickHouse does not interpret it as multi-statement SQL.
         rows = client.query(statements[0]).result_rows
         results[query_path.stem] = len(rows)
+    return results
+
+
+def run_public_smoke_queries(
+    client: Any,
+    query_dir: str | Path = "analytics/queries/public",
+) -> dict[str, int]:
+    """Execute one read-only statement per public analytical contract."""
+    results: dict[str, int] = {}
+    for query_path in sorted(Path(query_dir).glob("*.sql")):
+        if query_path.name.startswith("00_") or query_path.name.startswith("README"):
+            continue
+        statements = _split_sql(query_path.read_text(encoding="utf-8"))
+        if len(statements) != 1:
+            raise ValueError(f"Expected one analytical statement in {query_path}")
+        results[query_path.stem] = len(client.query(statements[0]).result_rows)
     return results
 
 
@@ -153,6 +203,39 @@ _WORKFORCE_COLUMNS = [
     "percentage",
     "source_value",
     "source_unit",
+    "published_at",
+]
+_PUBLIC_COLUMNS = [
+    "run_id",
+    "release_id",
+    "source_id",
+    "source_format",
+    "source_role",
+    "content_sha256",
+    "record_key",
+    "source_record_number",
+    "period_start",
+    "period_end",
+    "period_grain",
+    "calendar_year",
+    "calendar_year_be",
+    "fiscal_year",
+    "fiscal_year_be",
+    "entity_type",
+    "entity_code",
+    "entity_name",
+    "geography_type",
+    "geography_code",
+    "geography_name",
+    "category",
+    "subcategory",
+    "metric_name",
+    "metric_unit",
+    "value",
+    "reference_metric",
+    "reference_value",
+    "source_url",
+    "raw_payload",
     "published_at",
 ]
 
@@ -215,6 +298,67 @@ def _source_already_published(client: Any, table_name: str, source_hash: str) ->
         parameters={"source_hash": source_hash},
     )
     return bool(result.result_rows and result.result_rows[0][0])
+
+
+def _public_source_already_published(client: Any, source_id: str, source_hash: str) -> bool:
+    result = client.query(
+        """
+        SELECT count()
+        FROM fact_public_indicator
+        WHERE source_id = {source_id:String}
+          AND content_sha256 = {source_hash:String}
+        """,
+        parameters={"source_id": source_id, "source_hash": source_hash},
+    )
+    return bool(result.result_rows and result.result_rows[0][0])
+
+
+def _public_rows(
+    frame: pd.DataFrame,
+    *,
+    run_id: str,
+    release_id: str,
+    content_sha256: str,
+) -> list[tuple[Any, ...]]:
+    published_at = datetime.now(UTC)
+    rows: list[tuple[Any, ...]] = []
+    for row in _records(frame):
+        rows.append(
+            (
+                run_id,
+                release_id,
+                row["source_id"],
+                row["source_format"],
+                row["source_role"],
+                content_sha256,
+                row["record_key"],
+                int(row["source_record_number"]),
+                _date_value(row.get("period_start")),
+                _date_value(row.get("period_end")),
+                row["period_grain"],
+                _value(row.get("calendar_year")),
+                _value(row.get("calendar_year_be")),
+                _value(row.get("fiscal_year")),
+                _value(row.get("fiscal_year_be")),
+                row["entity_type"],
+                _value(row.get("entity_code")),
+                row["entity_name"],
+                row.get("geography_type") or "",
+                _value(row.get("geography_code")),
+                _value(row.get("geography_name")),
+                row.get("category") or "",
+                _value(row.get("subcategory")),
+                row["metric_name"],
+                row["metric_unit"],
+                _value(row.get("value")),
+                _value(row.get("reference_metric")),
+                _value(row.get("reference_value")),
+                row["source_url"],
+                json.dumps(row.get("raw_payload") or {}, ensure_ascii=False, default=str),
+                published_at,
+            )
+        )
+    return rows
 
 
 def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:

@@ -12,6 +12,7 @@ dependencies = [
   "beautifulsoup4>=4.12,<5",
   "clickhouse-connect>=0.8,<1",
   "openpyxl>=3.1,<4",
+  "pyarrow>=18,<24",
   # Airflow 2.10.5 providers in the local runtime require pandas <2.2.
   "pandas>=2.1.2,<2.2",
   "psycopg[binary]>=3.2,<4",

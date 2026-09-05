@@ -15,7 +15,7 @@
 - [x] Create bad-data fixture contract
 - [x] Run bootstrap safety review
 - [x] Validate metadata syntax, package smoke test, lint and Compose configuration
-- [x] Do not push to remote
+- [x] Push repository after explicit user approval
 
 ## P0 complete
 
@@ -44,9 +44,26 @@
 
 ## Optional after P0 is green
 
+- [x] Versioned parser-output schema contract
+- [x] Explicit operational run types and pipeline health view
+- [x] Multi-release/backfill integration evidence
+- [x] Analyst metric definition contract
 - [ ] GCS adapter
 - [ ] source discovery monitor
 - [ ] richer operational metrics/alerts
+
+## P2 complete
+
+- [x] Register deterministic CSV, nested JSON API, HTML and tabular JSON snapshots
+- [x] Add canonical public-indicator model without changing the original Excel facts
+- [x] Add raw payload/release history and current-version view
+- [x] Add content-hash release identity and period watermark state/events
+- [x] Add scheduled incremental, correction/backfill and retry-repair behavior
+- [x] Add public ClickHouse serving table and four analytical smoke queries
+- [x] Add self-contained dashboard and analytical story
+- [x] Add Parquet materialization exercise
+- [x] Add AI-to-DE learning guide, exercises, interview guide and project playbook
+- [x] Split README into English main page and Thai companion page
 
 ## Explicitly deferred
 
@@ -54,5 +71,6 @@
 - [ ] Spark
 - [ ] Kubernetes
 - [ ] Terraform
-- [ ] frontend/dashboard
+- [x] local self-contained dashboard
+- [ ] production BI/frontend deployment
 - [ ] ML/LLM features

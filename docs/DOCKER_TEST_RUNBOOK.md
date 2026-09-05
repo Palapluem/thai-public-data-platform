@@ -70,7 +70,8 @@ python -m thai_data_platform run `
   --postgres-url $env:POSTGRES_URL `
   --clickhouse-host 127.0.0.1 `
   --clickhouse-port 8123 `
-  --clickhouse-password $env:CLICKHOUSE_PASSWORD
+  --clickhouse-password $env:CLICKHOUSE_PASSWORD `
+  --run-type manual
 ```
 
 Expected result shape:
@@ -92,7 +93,7 @@ host port chosen for PostgreSQL.
 
 ```powershell
 docker compose exec -T postgres psql -U platform -d thai_data_platform -P pager=off -c `
-  "SELECT run_id,status,raw_cell_count,cgd_row_count,ocsc_row_count,dq_failed_check_count,core_published_at IS NOT NULL AS core_done,serving_published_at IS NOT NULL AS serving_done FROM ops.pipeline_run ORDER BY started_at DESC LIMIT 5;"
+  "SELECT run_id,run_type,status,raw_cell_count,cgd_row_count,ocsc_row_count,dq_failed_check_count,core_published_at IS NOT NULL AS core_done,serving_published_at IS NOT NULL AS serving_done FROM ops.pipeline_run ORDER BY started_at DESC LIMIT 5;"
 ```
 
 Expected latest successful row:
@@ -105,6 +106,13 @@ ocsc_row_count        | 5784
 dq_failed_check_count | 0
 core_done             | t
 serving_done          | t
+```
+
+For a compact operational view:
+
+```powershell
+docker compose exec -T postgres psql -U platform -d thai_data_platform -P pager=off -c `
+  "SELECT run_id,run_type,status,health,duration_seconds,source_count FROM ops.pipeline_run_health ORDER BY started_at DESC LIMIT 10;"
 ```
 
 Check the relational layers:
@@ -195,6 +203,15 @@ serving_counts: skipped_existing_sources=2
 The reason is source-release identity (SHA-256 plus dataset metadata) and
 unique natural grain, rather than a fragile filename-only check.
 
+To simulate a new release, change a valid source workbook without reusing the
+old bytes, pass it as `--cgd` or `--ocsc`, and use `--run-type backfill`. The
+expected behavior is that the old release remains queryable, the new release
+gets its own facts, and rerunning the new bytes adds no duplicates.
+
+The versioned schema contract is checked before staging. Removing a required
+parser-output column should fail the run; adding an optional column should be
+reported as a warning.
+
 ## 9. Useful diagnostics and safe stop
 
 ```powershell
@@ -213,3 +230,73 @@ docker compose stop
 Use `docker compose down` only when removing the containers/network is desired.
 Do not add `-v` unless you intentionally want to delete the local database
 volumes and start the demo from an empty state.
+
+## 10. Run the multi-format public pipeline
+
+The P2 path is independent from the original Excel DAG. It reads the four
+registered snapshots in [`../config/public_sources.yml`](../config/public_sources.yml)
+and writes release/raw/staging/core/watermark evidence.
+
+From the repository root, set the same host credentials used by the existing
+CLI run:
+
+```powershell
+python -m thai_data_platform public-run `
+  --postgres-url $env:POSTGRES_URL `
+  --clickhouse-host 127.0.0.1 `
+  --clickhouse-port 8123 `
+  --clickhouse-password $env:CLICKHOUSE_PASSWORD `
+  --run-type scheduled
+```
+
+The first successful run selects the four snapshots. Run it again and inspect
+the JSON result: all `watermark_status` values should be `unchanged`,
+`stage_counts.selected_public_indicators` should be `0`, and
+`serving_counts.skipped_existing_sources` should be `4`.
+
+Inspect release and watermark evidence:
+
+```powershell
+docker compose exec -T postgres psql -U platform -d thai_data_platform -P pager=off -c `
+  "SELECT source_id,source_format,source_role,record_count,content_sha256 FROM raw.public_source_release ORDER BY source_id;"
+docker compose exec -T postgres psql -U platform -d thai_data_platform -P pager=off -c `
+  "SELECT source_id,watermark_value,last_run_id FROM ops.public_source_watermark ORDER BY source_id;"
+docker compose exec -T postgres psql -U platform -d thai_data_platform -P pager=off -c `
+  "SELECT source_id,status,previous_watermark,selected_watermark,selected_record_count FROM ops.public_watermark_event ORDER BY recorded_at DESC LIMIT 10;"
+```
+
+Run the public Airflow DAG:
+
+```powershell
+docker compose exec -T airflow-scheduler airflow dags unpause thai_public_multiformat
+docker compose exec -T airflow-scheduler airflow dags trigger thai_public_multiformat --run-id public_local_test_01
+```
+
+The DAG has two thin tasks: `run_public_multiformat_pipeline` and
+`build_public_dashboard`. Follow the same Grid/Graph/Log workflow as the
+original DAG. The dashboard task writes to the mounted `data/processed` folder.
+
+## 11. Build and inspect the dashboard
+
+```powershell
+python -m thai_data_platform public-dashboard `
+  --postgres-url $env:POSTGRES_URL `
+  --clickhouse-host 127.0.0.1 `
+  --clickhouse-port 8123 `
+  --clickhouse-password $env:CLICKHOUSE_PASSWORD
+python -m http.server 8090 --directory data/processed/public_dashboard
+```
+
+Open `http://127.0.0.1:8090`. Verify the monthly line has 22 points, the
+ministry chart is ranked, the labour quarter selector changes the regional
+chart, and the coverage table shows the HTML source as `validation`. This is a
+portable local artifact; it does not require an external BI service.
+
+## 12. Exercise a correction and a backfill
+
+Copy one public JSON/CSV file to a temporary path, change one existing value,
+and create a temporary source registry that points to that path. Run it with
+`--run-type backfill`. The expected evidence is a new content hash, a
+`backfill` watermark event, unchanged maximum watermark and a current-view row
+that resolves to the newest approved version. Keep the old release when
+diagnosing; do not delete rows to make counts look clean.

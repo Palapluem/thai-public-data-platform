@@ -63,6 +63,12 @@ services:
       POSTGRES_MIGRATIONS: /opt/airflow/sql/postgres
       CLICKHOUSE_MIGRATIONS: /opt/airflow/sql/clickhouse
       ANALYTICS_QUERY_DIR: /opt/airflow/analytics/queries
+      PUBLIC_SOURCE_CONFIG: /opt/airflow/config/public_sources.yml
+      PUBLIC_ANALYTICS_QUERY_DIR: /opt/airflow/analytics/queries/public
+      PUBLIC_PIPELINE_RUN_TYPE: ${PUBLIC_PIPELINE_RUN_TYPE:-scheduled}
+      PUBLIC_DASHBOARD_OUTPUT: /opt/airflow/data/processed/public_dashboard/index.html
+      SCHEMA_CONTRACT: /opt/airflow/config/schema_contracts.json
+      PIPELINE_RUN_TYPE: ${PIPELINE_RUN_TYPE:-manual}
     volumes: &airflow-volumes
       - ./dags:/opt/airflow/dags:ro
       - ./src:/opt/airflow/src:ro

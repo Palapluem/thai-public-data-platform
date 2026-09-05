@@ -1,228 +1,248 @@
 # Thai Public Data Platform
 
-ผลงาน portfolio สำหรับตำแหน่ง **Data Engineer — Siam Codex**
+[English](README.md) · [ภาษาไทย](README_TH.md)
 
-โปรเจกต์นี้ออกแบบให้เปลี่ยนรายงาน Excel สาธารณะจากสำนักงาน ก.พ. (OCSC) และกรมบัญชีกลาง (CGD) ให้เป็น data platform ที่มี lineage, idempotency, data-quality gate และ analytical serving layer ชัดเจน โดยใช้ PostgreSQL เป็น relational source of truth และ ClickHouse เป็นชั้นสำหรับการอ่านเชิงวิเคราะห์
+A portfolio-grade local data platform for public Thai finance and workforce
+data. It is designed to show the engineering boundary that an AI Engineer also
+needs when owning data products: reproducible ingestion, explicit grain,
+lineage, data-quality gates, incremental loading, operational metadata and
+analytical serving.
 
-> สถานะปัจจุบัน: **P0 implementation complete** — local parser/DQ tests ผ่านแล้ว และ Docker/CLI/Airflow runtime integration verified แล้ว
+## What is implemented
 
-## เป้าหมายของผลงาน
+The repository now contains two deliberately separate paths:
 
-ผลงานชิ้นนี้ตั้งใจให้ reviewer เห็นความสามารถด้าน Data Engineering ที่สำคัญในหนึ่ง repository:
+1. The original Excel path for source-specific workbook parsing, raw cell
+   evidence, PostgreSQL `raw → staging → core`, ClickHouse serving and the
+   eight-task Airflow DAG.
+2. A multi-format public-indicator path for CSV, nested JSON API, HTML table
+   and tabular JSON. It normalizes each source into one canonical model,
+   records release hashes and watermarks, keeps raw JSON evidence, applies a
+   fail-closed quality gate and serves a dashboard-ready ClickHouse table.
 
-- อ่านและ normalize Excel report ที่มี merged cells, multi-row headers, formula และ total/subtotal
-- เก็บ raw evidence ระดับไฟล์, sheet และ cell เพื่อ trace กลับต้นทางได้
-- ออกแบบ PostgreSQL schemas เป็น `raw → staging → core` พร้อม primary key, foreign key, unique grain และ check constraints
-- ทำ pipeline ให้รันซ้ำได้โดยใช้ SHA-256 ของ source release เป็น source identity
-- บันทึก pipeline run และผลตรวจคุณภาพใน `ops`
-- ส่ง downstream publishing หยุดแบบ fail-closed เมื่อ quality gate ไม่ผ่าน
-- ส่งเฉพาะข้อมูลที่ผ่าน gate ไป ClickHouse สำหรับ analytical SQL
-- ใช้ Airflow เป็น orchestration layer ที่บางและอ่านง่าย โดย business logic อยู่ใน `src/`
+The paths share operational principles but do not force unlike source grains
+into one fact table.
 
-## Locked architecture
+## Architecture
 
 ```mermaid
 flowchart LR
-    A[Official OCSC / CGD Excel] --> B[Python ingestion]
-    B --> C[Raw landing\nlocal first]
-    C --> D[(PostgreSQL\nraw)]
-    D --> E[(PostgreSQL\nstaging)]
-    E --> F[Data Quality Gate]
-    F --> G[(PostgreSQL\ncore)]
-    G --> H[(ClickHouse\nanalytical serving)]
-    H --> I[Analytical SQL]
-    J[Apache Airflow] -. orchestrates .-> B
-    J -. orchestrates .-> F
-    K[GitHub Actions] -. CI only .-> B
+    A[Official public files and APIs] --> B[Format adapters]
+    B --> C[Canonical public_indicator]
+    C --> D[Raw release + raw payload]
+    D --> E[(PostgreSQL raw / staging / core / ops)]
+    E --> F[Quality gate]
+    F --> G[(ClickHouse analytical serving)]
+    G --> H[SQL contracts]
+    G --> I[Self-contained dashboard]
+    J[Airflow] -. orchestrates .-> B
+    J -. records .-> E
+    K[GitHub Actions] -. lint and tests .-> B
 ```
 
-กติกาที่ล็อกไว้:
+PostgreSQL is the relational source of truth and keeps release history.
+ClickHouse is a rebuildable read model. Airflow owns dependency and retry
+orchestration; reusable Python modules own parsing, validation and database
+work. The local stack is defined in `docker-compose.yml`.
 
-| ส่วน | หน้าที่ | สิ่งที่ไม่ทำ |
-|---|---|---|
-| Python | ingestion, parsing, transform, validation และ load orchestration adapter | ไม่ฝัง business logic ใน DAG |
-| Local raw landing | รับไฟล์ต้นทางก่อนเข้า database | ไม่ถือเป็น warehouse of record |
-| PostgreSQL | canonical relational truth: `raw`, `staging`, `core`, `ops` | ไม่ใช้ DuckDB เป็น architecture หลัก |
-| Data Quality Gate | ตรวจข้อมูลก่อน publish | ไม่ปล่อย partial downstream publish |
-| ClickHouse | analytical serving/read model | ไม่ใช้เป็น source of truth |
-| Airflow | schedule, dependency, retry, run context | ไม่ใส่ parser หรือ SQL business rules ใน DAG |
-| GitHub Actions | lint และ test CI | ไม่ทำ orchestration รายเดือน |
-| GCS | optional raw landing หลัง P0 green | ไม่เริ่มในวันแรก |
+## Public sources and formats
 
-## Baseline ที่ตรวจสอบแล้ว
+The checked-in snapshots are small, deterministic examples. Each entry in
+[`config/public_sources.yml`](config/public_sources.yml) retains its official
+source page, download/API URL, parser, role, hash-derived release identity and
+watermark policy.
 
-ไฟล์ baseline เป็น public releases ที่เก็บไว้เพื่อให้ local demo ทำซ้ำได้ และมี hash, reporting period และ source page กำกับไว้ใน [`config/source_manifest.json`](config/source_manifest.json)
+The canonical field and semantic rules are versioned in
+[`config/public_source_contract.json`](config/public_source_contract.json).
 
-| Dataset | ไฟล์ | Sheets | Non-empty cells | Formula cells | Parsed rows | Reporting period |
-|---|---|---:|---:|---:|---:|---|
-| OCSC government manpower | `datasets/ocsc/thai-gov-manpower-2567.4.xlsx` | 68 | 32,653 | 261 | 5,784 | FY 2567 / 2024 |
-| CGD budget execution | `datasets/cgd/2026.07.03.xlsx` | 15 | 93,237 | 19 | 2,937 | as of 3 Jul 2569 / 2026 |
-| รวม | 2 files | 83 | 125,890 | 280 | 8,721 | คนละ reporting period |
+| Source | Format | Role | Canonical grain |
+|---|---|---|---|
+| Ministry of Finance budget summary | CSV | authoritative | department × fiscal year × metric |
+| Ministry of Finance monthly expenditure | nested JSON API | authoritative | ministry × month × metric |
+| Ministry of Finance budget summary | HTML table | validation | release section × ministry × metric |
+| National Statistical Office labour force | tabular JSON | authoritative | region × quarter × sex × metric |
+| NSO canonical materialization | Parquet | derived exercise | columnar copy of canonical rows |
 
-ข้อควรระวังสำคัญ: OCSC baseline และ CGD baseline เป็นคนละช่วงเวลา จึงห้ามตีความ join หรือ ratio ระหว่างสองแหล่งเป็นความสัมพันธ์เชิงเวลาโดยอัตโนมัติ
+Official references: [DGA Government Spending dataset](https://data.go.th/dataset/gfsummary),
+[Ministry of Finance Data Services](https://dataservices.mof.go.th/menu4?id=3&lang=en),
+and [NSO labour-force dataset](https://data.go.th/en/dataset/0706_02_0001).
 
-## Airflow DAG contract
+See [`datasets/public/README.md`](datasets/public/README.md) for snapshot
+hashes, retrieval dates and refresh guidance.
 
-DAG contract ใน [`dags/README.md`](dags/README.md) มี task IDs ดังนี้:
+## Canonical public-indicator contract
 
-```text
-prepare_run
-    ↓
-┌────────────┐
-ingest_cgd   ingest_ocsc
-└──────┬─────┘
-       ↓
-validate_staging
-       ↓
-publish_core
-       ↓
-quality_gate
-       ↓
-publish_clickhouse
-       ↓
-analytics_smoke
-```
+Every normalized row carries:
 
-Executable DAG, PostgreSQL DDL/loader และ ClickHouse publisher อยู่ใน repository แล้ว; คำสั่งรันจริงอยู่ในหัวข้อ Local runbook ด้านล่าง
+- `source_id`, `source_format`, `source_role`, `source_url` and content hash
+  through its release record;
+- a deterministic `record_key` and `source_record_number`;
+- `period_start`, `period_end`, `period_grain`, calendar/fiscal year fields;
+- entity and geography dimensions;
+- `metric_name`, `metric_unit`, `value`;
+- optional `reference_metric` and `reference_value`; and
+- `raw_payload` for source-level audit evidence.
 
-## Data-quality contract
+The database grain is `(release_id, record_key, metric_name)`. PostgreSQL
+retains every release in `raw.public_source_release` and
+`core.fact_public_indicator`; [`core.v_public_indicator_current`](sql/postgres/008_public_sources.sql)
+selects the newest published version for a natural key. ClickHouse uses a
+`ReplacingMergeTree` keyed by `(source_id, record_key, metric_name)`.
 
-Quality gate ต้องครอบคลุมอย่างน้อย:
+## Incremental and watermark behavior
 
-- required keys และ required source metadata
-- zero-row extraction
-- duplicate natural grain
-- negative financial values
-- percentage bounds `0–100` for rates; signed monthly target variance bounds `-100–100`
-- reconciliation ระหว่าง detail กับ published total เมื่อ semantic grain เปรียบเทียบได้
-- foreign-key integrity
-- unexpected row-count collapse เทียบกับ baseline/previous successful run
+The pipeline uses content identity and period watermark together:
 
-ไฟล์ [`tests/fixtures/bad_data_quality.json`](tests/fixtures/bad_data_quality.json) เป็น bad-data contract สำหรับพิสูจน์ว่า gate ต้องหยุด `publish_core`/`publish_clickhouse` เมื่อข้อมูลผิด
+- same bytes → release already known → `unchanged`, no selected rows;
+- new bytes with a later `period_end` → select only rows after the previous
+  watermark and mark `advanced`;
+- new bytes with an equal/older maximum period → process all rows as a
+  correction `backfill`, but never move the watermark backwards;
+- `--run-type backfill` or `replay` → explicitly process the complete release;
+- watermark commit occurs only after ClickHouse publication succeeds.
 
-## Analytical questions
+This makes retry and correction behavior visible in
+`ops.public_watermark_event` rather than hiding it inside an upsert.
 
-มี SQL สำหรับตอบคำถามต่อไปนี้:
+## Quickstart
 
-1. หน่วยงานหรือหมวดใดมี budget allocation สูงสุด
-2. หน่วยงานใดมี disbursement ต่ำกว่าค่ามัธยฐานของกลุ่มที่เทียบกันได้
-3. การกระจาย workforce ตาม ministry, entity type และ metric group เป็นอย่างไร
-4. budget-to-workforce ratio ของหน่วยงานที่ match กันได้เป็นอย่างไร
-
-ทุก query ต้องกรอง `report_type`, `expense_category`, `entity_type`, metric และ reporting period ให้ตรง grain ก่อน aggregate
-
-## Repository map
-
-```text
-.
-├── .github/workflows/          # CI only
-├── analytics/queries/          # analyst-facing SQL and serving smoke checks
-├── config/                     # public source registry and baseline manifest
-├── dags/                       # Airflow contract; orchestration only
-├── datasets/                   # public baseline Excel files
-├── docs/                       # charter, design, decisions and validation evidence
-├── scripts/                    # explicit operational helpers (no secrets)
-├── sql/clickhouse/             # analytical serving DDL
-├── sql/postgres/               # raw/staging/core/ops migrations
-├── src/thai_data_platform/     # ingestion, transform, storage, warehouse, quality
-└── tests/                      # unit, integration and fixtures
-```
-
-## Validation & local runbook
-
-คำสั่งตรวจคุณภาพ:
+Install the package for local CLI and unit tests:
 
 ```powershell
 python -m pip install -e ".[dev]"
 python -m pytest
 python -m ruff check .
-python -m thai_data_platform profile --ocsc datasets/ocsc/thai-gov-manpower-2567.4.xlsx --cgd datasets/cgd/2026.07.03.xlsx
-python -m thai_data_platform quality-fixture  # expected exit code 1: gate must block
-docker compose config
 ```
 
-`quality-fixture` ต้องคืน exit code `1` เพราะเป็น fixture ที่ตั้งใจเสียเพื่อพิสูจน์ fail-closed behavior
-
-### Run the local stack
-
-1. สร้าง `.env` จาก [`.env.example`](.env.example) แล้วเปลี่ยนค่ารหัสผ่านเฉพาะในเครื่อง (ถ้ามี `.env` อยู่แล้วให้เก็บค่าเดิมไว้):
+Start the local services:
 
 ```powershell
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
-```
-
-ถ้าเครื่องมี PostgreSQL อื่นใช้ port `5432` อยู่ ให้ตั้ง `POSTGRES_PORT=55432` ใน `.env` และใช้ port เดียวกันใน connection string; การใช้ `127.0.0.1` ช่วยหลีกเลี่ยงความหน่วงจาก IPv6/`localhost` บน Windows
-
-2. เริ่ม stack ทั้งชุด (รวม migration ของ Airflow และ service dependencies):
-
-```powershell
+# Replace placeholder passwords in .env with local-only values.
 docker compose up -d --build
 docker compose ps
 ```
 
-ควรเห็น PostgreSQL และ ClickHouse เป็น `healthy`, Airflow scheduler/webserver เป็น `Up` และ webserver เปิดที่ `http://127.0.0.1:8080`
-
-3. ตั้งค่า connection string ใน PowerShell session เดียวกัน โดยใช้ password และ port เดียวกับ `.env`:
+Set `POSTGRES_URL` and `CLICKHOUSE_PASSWORD` in the same PowerShell session.
+Use the host PostgreSQL port from `.env` (the existing setup uses `55432`):
 
 ```powershell
-$env:POSTGRES_URL = "postgresql://platform:<POSTGRES_PASSWORD>@127.0.0.1:<POSTGRES_PORT>/thai_data_platform"
-$env:CLICKHOUSE_PASSWORD = "<CLICKHOUSE_PASSWORD>"
+$env:POSTGRES_URL = "postgresql://platform:<password>@127.0.0.1:55432/thai_data_platform"
+$env:CLICKHOUSE_PASSWORD = "<clickhouse-password>"
 ```
 
-4. ตรวจ workbook profile และ apply migrations (ถ้า `airflow-init` เพิ่งทำไปแล้ว คำสั่งนี้เป็นการตรวจซ้ำแบบปลอดภัย):
+Run the new public path:
 
 ```powershell
-python -m thai_data_platform profile `
-  --ocsc datasets/ocsc/thai-gov-manpower-2567.4.xlsx `
-  --cgd datasets/cgd/2026.07.03.xlsx
-python -m thai_data_platform migrate --postgres-url $env:POSTGRES_URL
+python -m thai_data_platform public-run `
+  --postgres-url $env:POSTGRES_URL `
+  --clickhouse-host 127.0.0.1 `
+  --clickhouse-port 8123 `
+  --clickhouse-password $env:CLICKHOUSE_PASSWORD `
+  --run-type scheduled
 ```
 
-5. รัน full path จาก Excel → PostgreSQL → DQ gate → ClickHouse:
+Run the same command again. The JSON result should show all four watermark
+statuses as `unchanged`, `selected_public_indicators` as `0`, and
+`skipped_existing_sources` as `4`. To inspect database evidence:
 
 ```powershell
-python -m thai_data_platform run `
-  --ocsc datasets/ocsc/thai-gov-manpower-2567.4.xlsx `
-  --cgd datasets/cgd/2026.07.03.xlsx `
+docker compose exec -T postgres psql -U platform -d thai_data_platform `
+  -c "SELECT * FROM ops.pipeline_run_health ORDER BY started_at DESC LIMIT 10;"
+docker compose exec -T postgres psql -U platform -d thai_data_platform `
+  -c "SELECT source_id, watermark_value FROM ops.public_source_watermark ORDER BY source_id;"
+```
+
+Build the dashboard artifact:
+
+```powershell
+python -m thai_data_platform public-dashboard `
   --postgres-url $env:POSTGRES_URL `
   --clickhouse-host 127.0.0.1 `
   --clickhouse-port 8123 `
   --clickhouse-password $env:CLICKHOUSE_PASSWORD
+python -m http.server 8090 --directory data/processed/public_dashboard
 ```
 
-การรันซ้ำด้วยไฟล์เดิมใช้ SHA-256 และ unique grain เดิม จึงไม่สร้าง source/staging/core/serving rows ซ้ำ
+Open `http://127.0.0.1:8090`. The output contains KPI cards, a 22-point
+monthly trend, top ministry comparison, a selectable labour-force quarter,
+source coverage and caveats. It uses no CDN or external JavaScript.
 
-### Run Airflow
-
-Airflow ใช้ image ที่ติดตั้ง package นี้แล้วและ mount DAG, source, migrations, queries และ runtime data ไว้ครบ:
+Materialize the Parquet exercise:
 
 ```powershell
-docker compose ps
-docker exec thai-public-data-platform-airflow-scheduler-1 airflow dags unpause thai_public_data_platform
-docker exec thai-public-data-platform-airflow-scheduler-1 airflow dags trigger thai_public_data_platform --run-id manual_local_test
+python -m thai_data_platform public-parquet `
+  --source-id nso_labour_region_sex_json_2569
 ```
 
-เปิด `http://127.0.0.1:8080` แล้วติดตาม DAG `thai_public_data_platform` แบบ manual ได้ โดยใช้ credentials จาก `.env`; default schedule เป็น `None` และ timezone ของ DAG เป็น Asia/Bangkok รายละเอียดคำสั่งตรวจ task, row counts, positive/negative test และ cleanup อยู่ใน [`docs/DOCKER_TEST_RUNBOOK.md`](docs/DOCKER_TEST_RUNBOOK.md)
+Run the new Airflow DAG after the stack is healthy:
 
-## Scope boundary ของวันแรก
+```powershell
+docker compose exec -T airflow-scheduler airflow dags unpause thai_public_multiformat
+docker compose exec -T airflow-scheduler airflow dags trigger thai_public_multiformat --run-id public_local_test_01
+```
 
-### P0
+The full Docker walkthrough is in [`docs/DOCKER_TEST_RUNBOOK.md`](docs/DOCKER_TEST_RUNBOOK.md).
 
-Python, PostgreSQL, Docker, Airflow, idempotency, data quality, analytical SQL, ClickHouse, tests และ README
+## Analytical story
 
-### Optional หลัง core green
+The dashboard is intentionally descriptive and source-aware:
 
-GCS สำหรับ raw landing
+1. **Momentum:** how does monthly expenditure move across the available
+   month-end periods?
+2. **Concentration:** which ministry groups account for the largest annual
+   disbursement amount?
+3. **Context:** how does the latest regional labour-force base vary across
+   regions?
+4. **Trust:** are source role, period, watermark, row count and caveat visible
+   before interpreting a chart?
 
-### ยังไม่เริ่ม
+The API's annual budget is a repeated reference attribute on each monthly
+record, so it is never summed in the trend. The HTML table is validation
+evidence and is never added to authoritative finance totals. The finance
+and labour sources do not represent one contemporaneous population, so the
+project does not claim causal relationships between them.
 
-Kafka, Spark, Kubernetes, Terraform, frontend, ML, LLM และ dashboard ที่ไม่จำเป็นต่อ proof of engineering
+SQL contracts live under [`analytics/queries/public`](analytics/queries/public),
+and the narrative is documented in [`docs/ANALYTICAL_STORY.md`](docs/ANALYTICAL_STORY.md).
 
-## Security baseline
+## Learning materials for an AI Engineer
 
-- ไม่ commit `.env`, service-account JSON, credentials, private key หรือ generated database files
-- ใช้ค่าตัวอย่างที่ปลอดภัยและไม่ใช่ secret จริงใน [`.env.example`](.env.example) เท่านั้น
-- bind development services กับ `127.0.0.1` ใน Compose
-- ตรวจ source snapshot และไฟล์ที่สร้างด้วย high-confidence secret scan ก่อนส่งมอบ
+Use these in order while reading the code:
 
-รายละเอียด data provenance และวิธีทำให้ baseline reproducible อยู่ที่ [`docs/PROVENANCE.md`](docs/PROVENANCE.md)
+1. [`docs/DATA_ENGINEERING_LEARNING_GUIDE.md`](docs/DATA_ENGINEERING_LEARNING_GUIDE.md)
+   — mental model, layer responsibilities, trade-offs and AI-to-data gaps.
+2. [`docs/INCREMENTAL_WATERMARK.md`](docs/INCREMENTAL_WATERMARK.md) — release
+   identity, late data, correction and retry state machine.
+3. [`docs/PRACTICE_EXERCISES.md`](docs/PRACTICE_EXERCISES.md) — hands-on tasks
+   with expected evidence and extension challenges.
+4. [`docs/INTERVIEW_GUIDE_AI_TO_DATA.md`](docs/INTERVIEW_GUIDE_AI_TO_DATA.md)
+   — question patterns and a concise project explanation.
+5. [`docs/NEW_PROJECT_PLAYBOOK.md`](docs/NEW_PROJECT_PLAYBOOK.md) — how to
+   discover grain, ownership, SLAs, contracts and failure modes in a new team.
+
+## Validation
+
+The local test suite covers parser contracts, canonical grain, DQ checks,
+watermark decisions, query contracts and DAG boundaries. Optional integration
+tests require the running services:
+
+```powershell
+python -m pytest tests/unit
+$env:RUN_PUBLIC_INTEGRATION = "1"
+$env:RUN_FULL_INTEGRATION = "1"
+python -m pytest tests/integration
+```
+
+CI runs lint, JSON/YAML validation, Python compilation, unit tests and the
+application image build. It does not require production credentials.
+
+## Scope boundary
+
+This is a strong local and portfolio implementation, not a claim of a
+production cloud deployment. Object storage, Spark benchmarking, streaming,
+IAM, alerting, secret management and automated rollback are documented as
+next production extensions. The important interview distinction is to explain
+what is implemented and what is deliberately deferred.
+
+Never commit `.env`, credentials, generated database files or runtime output.
