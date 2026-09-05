@@ -40,9 +40,31 @@
 
 | Table | Grain | Key/relationship | Purpose |
 |---|---|---|---|
-| `ops.pipeline_run` | 1 row ต่อ execution attempt | `run_id` PK | status, timestamps, requested releases, counts and publish state |
+| `ops.pipeline_run` | 1 row ต่อ execution attempt | `run_id` PK | status, run type, timestamps, requested releases, counts and publish state |
 | `ops.dq_result` | 1 row ต่อ run × check | PK; FK → `ops.pipeline_run` | check name, severity, count, sample and pass/fail |
 | `ops.source_release_observation` | 1 row ต่อ source check × observed release | PK; FK → source file when known | optional discovery evidence and source availability |
+
+`ops.pipeline_run.run_type` is constrained to `manual`, `scheduled`, `backfill`
+or `replay`. `ops.pipeline_run_health` is a read-only operational view that
+classifies a run as `healthy`, `awaiting_serving`, `in_progress` or
+`action_required`.
+
+## Public-indicator extension
+
+| Table | Grain | Purpose |
+|---|---|---|
+| `raw.public_source_release` | source ID × exact content hash | release identity, official URL, format, role and record count |
+| `raw.public_record` | release × canonical record key | raw payload and source row number for audit |
+| `staging.public_indicator` | release × record key × metric selected for this run | typed canonical handoff before DQ |
+| `core.fact_public_indicator` | release × record key × metric | approved versioned indicator history |
+| `core.v_public_indicator_current` | source × record key × metric | latest published version for analyst reads |
+| `ops.public_source_watermark` | one row per source ID | last committed business period and release |
+| `ops.public_watermark_event` | run × source | advanced/unchanged/backfill decision evidence |
+
+The public row grain is `(release_id, record_key, metric_name)`. `value` is the
+measure; `reference_metric`/`reference_value` are explicitly non-additive
+context. `source_role` distinguishes authoritative, validation and derived
+representations so validation data is not accidentally summed into metrics.
 
 ## Required identity and metadata fields
 
@@ -109,8 +131,13 @@ The PostgreSQL implementation must include:
 1. Insert source/run/raw/staging evidence in a transaction. Staging is intentionally permissive for numeric values that DQ must explain.
 2. Run checks against staging.
 3. On blocking failure, commit only raw/staging/ops evidence with failed status; do not publish core or ClickHouse.
-4. On pass, publish core and mark the run successful in one controlled transaction.
-5. Publish ClickHouse from the approved core run only.
+4. On pass, publish core and mark the run `core_published` in one controlled transaction.
+5. Publish ClickHouse from the approved core run only, then mark the run `serving_published`.
+
+Core and ClickHouse are intentionally separate transaction boundaries. If
+ClickHouse publication fails, PostgreSQL core remains the canonical approved
+handoff and the operational run stays visible for retry/recovery; it is not
+silently reported as a completely successful serving run.
 
 ## Reporting-period caveat
 

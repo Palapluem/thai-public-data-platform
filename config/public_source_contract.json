@@ -1,0 +1,29 @@
+{
+  "contract_version": 1,
+  "canonical_table": "staging.public_indicator",
+  "required_columns": [
+    "source_id",
+    "source_format",
+    "source_role",
+    "record_key",
+    "source_record_number",
+    "period_start",
+    "period_end",
+    "period_grain",
+    "entity_type",
+    "entity_name",
+    "metric_name",
+    "metric_unit",
+    "value",
+    "source_url",
+    "raw_payload"
+  ],
+  "allowed_formats": ["csv", "json", "html", "parquet"],
+  "allowed_roles": ["authoritative", "validation", "derived"],
+  "grain": "release_id × record_key × metric_name",
+  "policy": {
+    "reference_value_is_non_additive": true,
+    "watermark_field": "period_end",
+    "validation_sources_are_excluded_from_authoritative_totals": true
+  }
+}

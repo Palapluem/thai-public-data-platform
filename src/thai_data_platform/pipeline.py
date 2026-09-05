@@ -13,6 +13,7 @@ from thai_data_platform.config import expected_row_counts, source_metadata
 from thai_data_platform.ingestion.metadata import new_run_id
 from thai_data_platform.quality.checks import run_data_quality_checks
 from thai_data_platform.quality.gate import QualityGateError, evaluate_quality_gate
+from thai_data_platform.quality.schema_contract import validate_extract_contracts
 from thai_data_platform.storage.landing import land_file
 from thai_data_platform.transform.cgd import extract_cgd_workbook
 from thai_data_platform.transform.ocsc import extract_ocsc_workbook
@@ -22,6 +23,7 @@ from thai_data_platform.warehouse import clickhouse, postgres
 @dataclass(frozen=True)
 class PipelineResult:
     run_id: str
+    run_type: str
     status: str
     stage_counts: dict[str, int]
     core_counts: dict[str, int]
@@ -44,6 +46,8 @@ def run_pipeline(
     migrations_dir: str | Path = "sql/postgres",
     serving_migrations_dir: str | Path = "sql/clickhouse",
     query_dir: str | Path = "analytics/queries",
+    schema_contract_path: str | Path = "config/schema_contracts.json",
+    run_type: str = "manual",
 ) -> PipelineResult:
     """Run the full local pipeline and fail closed before serving on bad data."""
     landed_ocsc = land_file(ocsc_path, "ocsc_government_manpower", raw_root)
@@ -54,10 +58,16 @@ def run_pipeline(
     sources = [ocsc_meta, cgd_meta]
 
     postgres.run_migrations(postgres_url, migrations_dir)
-    postgres.prepare_run(postgres_url, run_id, [source.sha256 for source in sources])
+    postgres.prepare_run(
+        postgres_url,
+        run_id,
+        [source.sha256 for source in sources],
+        run_type=run_type,
+    )
     try:
         cgd_extract = extract_cgd_workbook(landed_cgd.path, cgd_meta, run_id)
         ocsc_extract = extract_ocsc_workbook(landed_ocsc.path, ocsc_meta, run_id)
+        validate_extract_contracts(cgd_extract, ocsc_extract, schema_contract_path)
         if cgd_extract.as_of_date:
             cgd_meta = replace(cgd_meta, as_of_date=cgd_extract.as_of_date.isoformat())
             sources = [ocsc_meta, cgd_meta]
@@ -121,6 +131,7 @@ def run_pipeline(
         failed_checks = int(dq_frame["status"].eq("failed").sum())
         return PipelineResult(
             run_id=run_id,
+            run_type=run_type,
             status="serving_published",
             stage_counts={
                 "raw_cells": stage_counts.raw_cell_count,

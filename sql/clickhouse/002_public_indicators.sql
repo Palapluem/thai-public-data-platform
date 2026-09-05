@@ -1,0 +1,36 @@
+CREATE TABLE IF NOT EXISTS analytics.fact_public_indicator
+(
+    run_id UUID,
+    release_id UUID,
+    source_id LowCardinality(String),
+    source_format LowCardinality(String),
+    source_role LowCardinality(String),
+    content_sha256 String,
+    record_key String,
+    source_record_number UInt32,
+    period_start Nullable(Date),
+    period_end Nullable(Date),
+    period_grain LowCardinality(String),
+    calendar_year Nullable(Int32),
+    calendar_year_be Nullable(Int32),
+    fiscal_year Nullable(Int32),
+    fiscal_year_be Nullable(Int32),
+    entity_type LowCardinality(String),
+    entity_code Nullable(String),
+    entity_name String,
+    geography_type LowCardinality(String),
+    geography_code Nullable(String),
+    geography_name Nullable(String),
+    category String,
+    subcategory Nullable(String),
+    metric_name LowCardinality(String),
+    metric_unit LowCardinality(String),
+    value Nullable(Decimal(24, 6)),
+    reference_metric Nullable(String),
+    reference_value Nullable(Decimal(24, 6)),
+    source_url String,
+    raw_payload String,
+    published_at DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(published_at)
+ORDER BY (source_id, record_key, metric_name);

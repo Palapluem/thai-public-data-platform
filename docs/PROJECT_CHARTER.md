@@ -2,11 +2,14 @@
 
 ## Project intent
 
-สร้างผลงาน portfolio แบบ end-to-end สำหรับตำแหน่ง Data Engineer โดยแสดงให้เห็นว่าเราสามารถนำ public-sector Excel reports ที่ออกแบบเพื่อให้มนุษย์อ่าน มาเปลี่ยนเป็นข้อมูลที่โหลดซ้ำได้ ตรวจสอบย้อนกลับได้ และส่งต่อให้ analyst ใช้งานได้อย่างปลอดภัย
+สร้างผลงาน portfolio แบบ end-to-end ที่ต่อยอดประสบการณ์ AI Engineer ไปสู่งาน
+Data Engineering และ Data Analytics โดยแสดงให้เห็นว่าเราสามารถนำ public-sector
+Excel reports ที่ออกแบบเพื่อให้มนุษย์อ่าน มาเปลี่ยนเป็นข้อมูลที่โหลดซ้ำได้
+ตรวจสอบย้อนกลับได้ และส่งต่อให้ analyst ใช้งานได้อย่างปลอดภัย
 
 ## Target role
 
-**Data Engineer — Siam Codex**
+**AI Engineer / Data Engineer / Data Analyst portfolio**
 
 ## Problem statement
 
@@ -40,6 +43,13 @@ OCSC และ CGD เผยแพร่ข้อมูลใน workbook ที
 - GCS object storage adapter
 - source discovery automation ที่ไม่กระทบ deterministic local demo
 - เพิ่ม monitoring/alerting เชิง production
+
+## P1 production-hardening slice
+
+- Versioned parser-output schema contract ที่ fail closed ก่อน staging
+- Explicit operational run type สำหรับ manual, scheduled, backfill และ replay
+- Multi-release integration evidence และ `ops.pipeline_run_health` view
+- Analyst metric contract ที่ระบุ grain, filter และ caveat ก่อน aggregate
 
 ## Explicit non-goals for the one-day build
 

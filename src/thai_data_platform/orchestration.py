@@ -22,6 +22,7 @@ from thai_data_platform.config import expected_row_counts, source_metadata
 from thai_data_platform.ingestion.metadata import new_run_id
 from thai_data_platform.quality.checks import run_data_quality_checks
 from thai_data_platform.quality.gate import QualityGateError, evaluate_quality_gate
+from thai_data_platform.quality.schema_contract import validate_extract_contracts
 from thai_data_platform.storage.landing import land_file
 from thai_data_platform.transform.cgd import CgdExtract, extract_cgd_workbook
 from thai_data_platform.transform.ocsc import OcscExtract, extract_ocsc_workbook
@@ -37,6 +38,8 @@ def prepare_run_context(
     migrations_dir: str | Path = "sql/postgres",
     serving_migrations_dir: str | Path = "sql/clickhouse",
     query_dir: str | Path = "analytics/queries",
+    schema_contract_path: str | Path = "config/schema_contracts.json",
+    run_type: str = "manual",
 ) -> dict[str, Any]:
     """Land sources, create a run row and return non-secret task context."""
     postgres_url = _required_env("POSTGRES_URL")
@@ -49,7 +52,12 @@ def prepare_run_context(
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
     postgres.run_migrations(postgres_url, migrations_dir)
-    postgres.prepare_run(postgres_url, run_id, [ocsc_meta.sha256, cgd_meta.sha256])
+    postgres.prepare_run(
+        postgres_url,
+        run_id,
+        [ocsc_meta.sha256, cgd_meta.sha256],
+        run_type=run_type,
+    )
     return {
         "run_id": run_id,
         "ocsc_path": str(ocsc_meta.path),
@@ -59,6 +67,8 @@ def prepare_run_context(
         "migrations_dir": str(migrations_dir),
         "serving_migrations_dir": str(serving_migrations_dir),
         "query_dir": str(query_dir),
+        "schema_contract_path": str(schema_contract_path),
+        "run_type": run_type,
         "artifact_dir": str(artifact_dir),
         "source_hashes": {"ocsc": ocsc_meta.sha256, "cgd": cgd_meta.sha256},
     }
@@ -119,6 +129,11 @@ def validate_staging(
     ocsc_extract = _load_ocsc_extract(ocsc_handoff["artifact_path"])
     sources = _sources(context, cgd_extract.as_of_date)
     try:
+        validate_extract_contracts(
+            cgd_extract,
+            ocsc_extract,
+            context["schema_contract_path"],
+        )
         stage_result = postgres.stage_extracts(
             postgres_url,
             context["run_id"],
@@ -193,10 +208,13 @@ def publish_core(state: dict[str, Any]) -> dict[str, Any]:
 
 def quality_gate(state: dict[str, Any]) -> dict[str, Any]:
     """Re-check persisted DQ evidence after core publication."""
-    postgres.assert_persisted_quality_gate(
-        _required_env("POSTGRES_URL"),
-        state["context"]["run_id"],
-    )
+    postgres_url = _required_env("POSTGRES_URL")
+    run_id = state["context"]["run_id"]
+    try:
+        postgres.assert_persisted_quality_gate(postgres_url, run_id)
+    except QualityGateError as exc:
+        postgres.mark_run_failed(postgres_url, run_id, str(exc))
+        raise
     return state
 
 

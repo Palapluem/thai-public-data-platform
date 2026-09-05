@@ -46,6 +46,18 @@
 - [x] Bad-data fixture exited non-zero with blocking issues
 - [x] CI passes lint and tests locally
 
+## P1 production-hardening verification
+
+- [x] Versioned schema contract is validated before staging
+- [x] Missing required extract columns fail closed
+- [x] Additive extract columns are reported as warnings
+- [x] `manual`, `scheduled`, `backfill` and `replay` run types are constrained
+- [x] `ops.pipeline_run_health` exposes duration, volume and health status
+- [x] New source release creates new facts while the existing release remains queryable
+- [x] Backfill integration run is idempotent and records `run_type=backfill`
+- [x] Analyst metric contract documents grain, filters and double-counting caveats
+- [x] CI validates JSON/YAML contracts, Python compilation and the application image
+
 ## Final safety review
 
 - [x] `git status --short --branch` reviewed
@@ -53,3 +65,17 @@
 - [x] no `.env`, credential JSON, private key, log, `.duckdb` or generated DB artifact tracked
 - [x] source URLs and provenance notes are documented
 - [x] no remote push without explicit instruction
+
+## P2 multi-format verification
+
+- [x] Four public source snapshots have official URLs and SHA-256 identities
+- [x] CSV, nested JSON API, HTML table and tabular JSON parsers pass canonical DQ
+- [x] Validation HTML rows are retained but excluded from authoritative totals
+- [x] Repeated annual API budget is stored as a reference value, not summed monthly
+- [x] Public release/raw payload/staging/core/watermark migrations apply idempotently
+- [x] Same release rerun returns `unchanged` and zero selected public rows
+- [x] Watermarks commit after serving and repair an uncommitted release on retry
+- [x] Four public ClickHouse smoke queries return expected result shapes
+- [x] Dashboard and JSON snapshot generate from the local stack without external assets
+- [x] Parquet materialization command succeeds
+- [x] English main README and Thai companion README are linked

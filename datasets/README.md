@@ -9,4 +9,24 @@
 
 Baseline provenance and source-page URLs are recorded in [`config/source_manifest.json`](../config/source_manifest.json) and [`docs/PROVENANCE.md`](../docs/PROVENANCE.md)
 
+## Dataset layout
+
+The repository groups checked-in files by domain and source owner. The source
+format remains metadata in the source registry rather than the primary folder
+boundary:
+
+```text
+datasets/
+├── cgd/                         # baseline budget workbook
+├── ocsc/                        # baseline workforce workbook
+└── public/
+    ├── finance/mof/             # Ministry of Finance representations
+    ├── labour/nso/               # National Statistical Office representation
+    └── derived/labour/           # locally materialized Parquet exercise
+```
+
+Runtime landing and processed artifacts belong under `data/` and are ignored
+by Git; the checked-in snapshots under `datasets/` exist for reproducible local
+tests and portfolio review.
+
 ข้อควรระวัง: สองไฟล์เป็นคนละ reporting period และไม่ควรใช้ join เพื่อสรุปความสัมพันธ์เชิงเวลาโดยตรง

@@ -1,0 +1,76 @@
+version: 1
+description: >-
+  Deterministic public snapshots used by the multi-format public-indicator
+  pipeline. The files are checked into the repository so local runs and tests
+  remain reproducible; source URLs are retained for provenance and refresh work.
+sources:
+  - source_id: mof_budget_summary_csv_2568
+    dataset_name: mof_budget_summary
+    source_name: Ministry of Finance budget summary (data.go.th CSV)
+    source_page_url: https://data.go.th/dataset/gfsummary
+    file_url: https://data.go.th/dataset/78aed5e4-7940-47b6-83db-bf4ae90cb0b7/resource/c8a9d2cf-ea1e-4a2f-8f39-53bd4df0d4db/download/2568-gf-summary.csv
+    path: datasets/public/finance/mof/budget_summary_2568.csv
+    format: csv
+    parser: mof_budget_csv
+    source_role: authoritative
+    source_updated_at: 2025-10-01T00:00:00Z
+    watermark_field: period_end
+    watermark_strategy: max
+    expected_min_rows: 2500
+    enabled: true
+
+  - source_id: mof_budget_monthly_json_api_2026
+    dataset_name: mof_budget_monthly
+    source_name: Ministry of Finance monthly expenditure API
+    source_page_url: https://dataservices.mof.go.th/menu4?id=3&lang=en
+    file_url: https://dataservices.mof.go.th/api/data/expends/get_pay_ministry?sort=asc&from=2025-10-01&to=2026-07-01&freq=month&economic=false&ministry=true
+    path: datasets/public/finance/mof/budget_monthly_2026.json
+    format: json
+    parser: mof_budget_monthly_json_api
+    source_role: authoritative
+    source_updated_at: 2026-07-20T11:06:56Z
+    watermark_field: period_end
+    watermark_strategy: max
+    expected_min_rows: 600
+    enabled: true
+
+  - source_id: mof_budget_summary_html_2026
+    dataset_name: mof_budget_summary_validation
+    source_name: Ministry of Finance budget summary (HTML validation table)
+    source_page_url: https://dataservices.mof.go.th/menu4?id=3&lang=en
+    file_url: https://dataservices.mof.go.th/menu4?id=3&lang=en
+    path: datasets/public/finance/mof/budget_summary_2026.html
+    format: html
+    parser: mof_budget_html_table
+    source_role: validation
+    source_updated_at: 2026-07-20T11:06:56Z
+    watermark_field: period_end
+    watermark_strategy: max
+    expected_min_rows: 60
+    enabled: true
+
+  - source_id: nso_labour_region_sex_json_2569
+    dataset_name: nso_labour_force
+    source_name: National Statistical Office labour force by region and sex
+    source_page_url: https://data.go.th/en/dataset/0706_02_0001
+    file_url: https://catalogapi.nso.go.th/api/index?table=LFS_02_20534_1&format=json
+    path: datasets/public/labour/nso/labour_region_sex_2569.json
+    format: json
+    parser: nso_tabular_json
+    source_role: authoritative
+    source_updated_at: 2026-09-04T00:00:00Z
+    watermark_field: period_end
+    watermark_strategy: max
+    expected_min_rows: 300
+    enabled: true
+
+derived:
+  - source_id: nso_labour_region_sex_parquet_2569
+    dataset_name: nso_labour_force
+    source_name: Canonical Parquet materialization of the NSO snapshot
+    source_page_url: https://data.go.th/en/dataset/0706_02_0001
+    path: datasets/public/derived/labour/nso_labour_region_sex_2569.parquet
+    format: parquet
+    parser: canonical_parquet
+    source_role: derived
+    enabled: false

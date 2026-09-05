@@ -38,6 +38,11 @@ def thai_public_data_pipeline():
                 "sql/clickhouse",
             ),
             query_dir=os.getenv("ANALYTICS_QUERY_DIR", "analytics/queries"),
+            schema_contract_path=os.getenv(
+                "SCHEMA_CONTRACT",
+                "config/schema_contracts.json",
+            ),
+            run_type=os.getenv("PIPELINE_RUN_TYPE", "manual"),
         )
 
     @task(task_id="ingest_cgd")

@@ -27,3 +27,14 @@ def test_dag_contains_required_task_ids_and_thin_adapter_boundary():
     assert text.index("core_published = publish_core_task") < text.index(
         "gated = quality_gate_task"
     )
+
+
+def test_multiformat_dag_keeps_pipeline_and_dashboard_tasks_thin():
+    dag_path = Path("dags/thai_public_multiformat_pipeline.py")
+    text = dag_path.read_text(encoding="utf-8")
+
+    assert 'dag_id="thai_public_multiformat"' in text
+    assert 'task_id="run_public_multiformat_pipeline"' in text
+    assert 'task_id="build_public_dashboard"' in text
+    assert "run_public_pipeline" in text
+    assert "build_public_dashboard" in text
